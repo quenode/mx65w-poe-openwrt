@@ -5,7 +5,8 @@
 
 set -e
 
-HERE=$(cd "$(dirname "$0")" && pwd)
+# Resolve the repository root (this script lives in scripts/).
+HERE=$(cd "$(dirname "$0")/.." && pwd)
 OPENWRT="$HERE/openwrt"
 TARGET="target/linux/bcm53xx"
 
