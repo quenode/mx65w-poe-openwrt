@@ -1,0 +1,24 @@
+# Build output
+/openwrt/
+*.log
+build.log
+
+# Working reference trees used during development
+/dimmadont/
+
+# Scratch files
+*.ref
+*.orig
+*.pristine
+bcm_poe.c.ref
+
+# Editors
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc

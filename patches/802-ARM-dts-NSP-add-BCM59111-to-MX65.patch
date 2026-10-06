@@ -1,0 +1,27 @@
+From: mx65w-poe-build <noreply@example.com>
+Date: Thu, 6 Oct 2026 19:05:00 +0000
+Subject: [PATCH] ARM: dts: broadcom: add BCM59111 PSE node to Meraki MX65
+
+Declares the Broadcom BCM59111 PoE PSE controller on i2c0 so the
+bcm59111 hwmon driver can bind via device tree. max_power_mw matches
+the 60 W PSE budget reported by the hardware.
+
+Signed-off-by: mx65w-poe-build <noreply@example.com>
+---
+--- a/arch/arm/boot/dts/broadcom/bcm958625-meraki-alamo.dtsi
++++ b/arch/arm/boot/dts/broadcom/bcm958625-meraki-alamo.dtsi
+@@ -280,3 +280,14 @@
+ 		};
+ 	};
+ };
++
++&i2c0 {
++	bcm59111@21 {
++		compatible = "brcm,bcm59111";
++		pagesize = <32>;
++		reg = <0x21>;
++		ports = <2>;
++		port_base = <0>;
++		max_power_mw = <60000>;
++	};
++};

@@ -1,0 +1,53 @@
+OpenWrt with PoE support for the Cisco Meraki MX65 / MX65W
+==========================================================
+
+Copyright (C) 2026 mx65w-poe-openwrt contributors
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License version 2 as published by the Free
+Software Foundation.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 51 Franklin
+Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+The full text of the GNU General Public License version 2 is available at:
+https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
+
+
+THIRD-PARTY COMPONENTS
+----------------------
+
+1. drivers/hwmon/bcm59111.c
+
+   Derived from the PoE driver contained in Cisco Meraki's GPL firmware
+   release for the MX64/MX65:
+   https://dl.meraki.net/wired-14-39-mx64-20190426.tar.bz2
+
+   Original driver copyright: Timothy Passaro and Cisco Systems, Inc.
+   Modifications for device-tree support and modern kernel APIs by
+   Matthew Hagan, Matthew Bilker, Dimma Don't, and the contributors of
+   this project.
+
+   Licensed under GPL-2.0, consistent with the Cisco release.
+
+   The PSE firmware blob (bcm59111.bin) is likewise extracted from that
+   Cisco GPL firmware release.
+
+2. OpenWrt build system
+
+   Copyright (C) 2012-2026 OpenWrt project
+   Licensed under GPL-2.0
+
+3. U-Boot for the MX65 (not included here; obtained separately)
+
+   https://github.com/clayface/U-boot-MX64-20190430_MX65
+   Licensed under GPL-2.0
+
+
+Cisco, Meraki, and MX65 are trademarks of Cisco Systems, Inc. This project is
+not affiliated with or endorsed by Cisco Systems, Inc.

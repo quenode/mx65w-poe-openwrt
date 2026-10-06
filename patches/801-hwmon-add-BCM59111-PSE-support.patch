@@ -1,0 +1,41 @@
+From: mx65w-poe-build <noreply@example.com>
+Date: Thu, 6 Oct 2026 19:00:00 +0000
+Subject: [PATCH] hwmon: add BCM59111 PSE support
+
+Adds support for the Broadcom BCM59111 PoE PSE controller found on the
+Cisco Meraki MX65/MX65W. The driver with its embedded firmware image is
+derived from the Meraki MX64/MX65 GPL archive, modernised for current
+kernels (of_device based probe, class_create() without THIS_MODULE,
+ktime_get_real_seconds(), void i2c .remove).
+
+Signed-off-by: mx65w-poe-build <noreply@example.com>
+---
+--- a/drivers/hwmon/Makefile
++++ b/drivers/hwmon/Makefile
+@@ -57,6 +57,7 @@ obj-$(CONFIG_SENSORS_ASC7621)	+= asc7621.o
+ obj-$(CONFIG_SENSORS_ASPEED)	+= aspeed-pwm-tacho.o
+ obj-$(CONFIG_SENSORS_ATXP1)	+= atxp1.o
+ obj-$(CONFIG_SENSORS_AXI_FAN_CONTROL) += axi-fan-control.o
++obj-$(CONFIG_SENSORS_BCM59111)	+= bcm59111.o
+ obj-$(CONFIG_SENSORS_BT1_PVT)	+= bt1-pvt.o
+ obj-$(CONFIG_SENSORS_CORETEMP)	+= coretemp.o
+ obj-$(CONFIG_SENSORS_CORSAIR_CPRO) += corsair-cpro.o
+--- a/drivers/hwmon/Kconfig
++++ b/drivers/hwmon/Kconfig
+@@ -426,6 +426,16 @@ config SENSORS_ATXP1
+ 	  This driver can also be built as a module. If so, the module
+ 	  will be called atxp1.
+ 
++config SENSORS_BCM59111
++	tristate "Broadcom BCM59111"
++	depends on I2C
++	help
++	  If you say yes here you get support for the Broadcom BCM59111 PSE
++	  controller.
++
++	  This driver can also be built as a module. If so, the module
++	  will be called bcm59111.
++
+ config SENSORS_BT1_PVT
+ 	tristate "Baikal-T1 Process, Voltage, Temperature sensor driver"
+ 	depends on MIPS_BAIKAL_T1 || COMPILE_TEST
