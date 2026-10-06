@@ -62,17 +62,67 @@ That yields `brcmfmac.ko` plus the `brcmfmac-bca.ko`, `brcmfmac-cyw.ko` and
 ## Running the probe
 
 You do **not** need to flash this. Boot it from the USB stick to leave your
-installed firmware untouched.
+installed firmware untouched. The probe runs entirely in RAM, so nothing is
+written to NAND and a simple power cycle returns you to your installed
+firmware.
 
-### 1. Put the initramfs on the stick
+### 1. The filename is not optional
 
-The file must keep its exact name - U-Boot matches on that string:
+This is the part that catches people. U-Boot hardcodes the initramfs name:
 
-```sh
-cp openwrt-bcm53xx-generic-meraki_mx65w-initramfs.bin /mnt/dos/
+```
+initramfs_filename=openwrt-bcm53xx-generic-meraki_mx65-initramfs.bin
+usb_checkboot=if test $enable_usb_boot = 1; then usbload; fi
+usbload=usb start; fatload usb 0:1 ${loadaddr} ${initramfs_filename};
+        bootm ${loadaddr}#${config_dts}
 ```
 
-### 2. Boot it
+There is no `meraki_mx65w` entry anywhere. **A file named
+`...meraki_mx65w-initramfs.bin` will never be found and the router will fall
+back to the wrong image.** The probe initramfs has to sit at the canonical
+`meraki_mx65` name:
+
+```sh
+# stage the probe under the name U-Boot actually looks for
+cp openwrt-bcm53xx-generic-meraki_mx65w-initramfs.bin \
+   /mnt/dos/openwrt-bcm53xx-generic-meraki_mx65-initramfs.bin
+```
+
+Verify it afterwards - the checksum must be the probe's, not the old
+recovery image's:
+
+```sh
+cd /mnt/dos && sha256sum openwrt-bcm53xx-generic-meraki_mx65-initramfs.bin
+# 50d215c7f6e3e8a583ea6104eb1f527354aa7f69021570aa7289d56b12e520eb
+```
+
+If you displace an image already at that name, keep it under another name
+rather than overwriting it.
+
+### 2. The DTB does come from the probe
+
+U-Boot boots with `bootm ${loadaddr}#config@3`, which sounds like it would
+override the device tree. It does not - it selects a configuration *within*
+the image, and each image carries its own:
+
+```
+$ dumpimage -l openwrt-bcm53xx-generic-meraki_mx65w-initramfs.bin
+ Image 1 (fdt-1)
+  Description:  ARM OpenWrt meraki_mx65w device tree blob
+ Default Configuration: 'config@3'
+```
+
+Extracted from each image's `config@3`:
+
+```
+mx65  : model = "Cisco Meraki MX65"   status okay x7   disabled x14
+probe : model = "Cisco Meraki MX65W"  status okay x9   disabled x12
+```
+
+So the probe really does boot with PCIe enabled, despite carrying the `mx65`
+filename.
+
+### 3. Boot it
 
 Plug the stick into the router and:
 
@@ -84,7 +134,7 @@ Plug the stick into the router and:
 If it does not boot, copy the file again - a truncated write is the usual
 cause.
 
-### 3. Collect the data
+### 4. Collect the data
 
 ```sh
 # The question: are the radios there?
@@ -131,19 +181,42 @@ exist - the outcome predicted in [WIFI.md](WIFI.md).
 
 ## After probing
 
-Return to the normal MX65 firmware whenever you like:
+Nothing was written to NAND, so just power-cycle to get your installed
+firmware back. No revert step is needed.
 
-```sh
-sysupgrade -n /path/to/openwrt-bcm53xx-generic-meraki_mx65-squashfs.sysupgrade.bin
+There is deliberately no probe sysupgrade image. `sysupgrade` validates the
+running board against the image metadata, and it refuses:
+
+```
+$ sysupgrade -T openwrt-bcm53xx-generic-meraki_mx65w-squashfs.sysupgrade.bin
+upgrade: Device meraki,mx65 not supported by this image
+upgrade: Supported devices: meraki,mx65w
+Image check failed.
 ```
 
-The `-n` wipes configuration, which is what you want when moving between
-profiles. Your `192.168.88.0/24` LAN settings and the firewall rules would
-otherwise be carried across and then migrated, which is rarely what you want
-during a hardware experiment.
+The router's installed board is `meraki,mx65`, so the check fails on the
+platform string alone. Overriding it with `sysupgrade -F` would write a
+firmware whose board metadata does not match the running system, which is a
+poor trade for a diagnostic that costs nothing to run from RAM.
 
-Alternatively, flash the initramfs without installing anything and simply
-power-cycle when finished. Nothing is written to NAND that way.
+To go back to a normal USB boot with your production image, restore the
+canonical name:
+
+```sh
+cp current-initramfs.bin \
+   /mnt/dos/openwrt-bcm53xx-generic-meraki_mx65-initramfs.bin
+```
+
+The stick is laid out so both fallbacks survive:
+
+| File | What it is |
+|---|---|
+| `openwrt-bcm53xx-generic-meraki_mx65-initramfs.bin` | Canonical slot - U-Boot only reads this name |
+| `mx65w-probe-initramfs.bin` | MX65W probe, for identification |
+| `current-initramfs.bin` | Production MX65 build (r0-7670f36) |
+| `mx65-r31914-fallback-initramfs.bin` | Older r31914 recovery image, still good |
+| `current-sysupgrade.bin` | Production sysupgrade |
+| `openwrt-bcm53xx-generic-meraki_mx65-squashfs.sysupgrade.bin` | r31914 sysupgrade |
 
 ## If the radios do show up
 
@@ -162,3 +235,21 @@ The device profile addition and config are captured under
 `patches/mx65w-probe/`. Apply the diff to
 `target/linux/bcm53xx/image/Makefile`, then use
 `patches/mx65w-probe/config` as `.config`.
+
+One thing to watch: `kmod-cfg80211` must be selected or nothing wireless
+builds. `CONFIG_PACKAGE_kmod-cfg80211=y` in the target config is what pulls in
+the kernel-side `CONFIG_CFG80211`, and `CONFIG_BRCMFMAC_PCIE=y` selects the
+PCIe bus. Without cfg80211 the kernel `config BRCMFMAC` cannot even be
+offered, since it `depends on CFG80211`, and `brcmfmac.ko` silently never
+appears.
+
+Confirm the driver landed rather than assuming it did:
+
+```sh
+# module was actually compiled
+find build_dir -name 'brcmfmac*.ko'
+
+# and is actually inside the image
+dumpimage -T flat_dt -p 1 -o /tmp/dtb <initramfs>.bin
+dtc -I dtb -O dts /tmp/dtb | grep -c 'status = "okay"'
+```
