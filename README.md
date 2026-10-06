@@ -36,20 +36,49 @@ problems at once.
 |---|---|
 | Native PoE on `lan11` / `lan12` | Working (BCM59111 PSE driver) |
 | `apk` package manager | Matches upstream snapshot, so it works |
-| LuCI web interface | Included |
+| LuCI web interface | Included (ucode LuCI) |
 | WireGuard | Included |
 | Ad blocking | `adblock` + `adblock-fast` |
 | Graphs / monitoring | `luci-app-statistics` |
 | USB storage | `kmod-usb-storage`, ext4, block-mount |
 | Web terminal | `ttyd` |
+| Wi-Fi / 802.11 | **Not possible - see [docs/WIFI.md](docs/WIFI.md)** |
 
 ### Known limitations
 
-- **Wi-Fi does not work.** The MX65W's Broadcom BCM43520 radios have no FLOSS
-  drivers. You need a separate access point for wireless.
-- **PoE is a community driver.** It has never been merged upstream and is not
-  covered by OpenWrt's support guarantees.
+- **Wi-Fi cannot be made to work.** The MX65W's Broadcom BCM43520 radios do not
+  even enumerate on the bus, and no in-tree driver covers them. Use an external
+  access point. Details and alternatives in [docs/WIFI.md](docs/WIFI.md).
+- **PoE is a community driver.** Never merged upstream, no support guarantee.
+  If PoE reliability matters, a MikroTik with PoE-out is a better choice - see
+  [docs/WIFI.md](docs/WIFI.md#poe-alternative).
 - The MX65/MX65W reached end-of-support on **28 May 2026**.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/INSTALL.md](docs/INSTALL.md) | Full installation, from a blank device |
+| [docs/NETWORK.md](docs/NETWORK.md) | LAN/WAN setup, DHCP, firewall, handover |
+| [docs/POE.md](docs/POE.md) | How PoE works and how to read port state |
+| [docs/WIFI.md](docs/WIFI.md) | Why the MX65W radios cannot be used |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common faults and their fixes |
+
+## Verified on hardware
+
+The following was confirmed on a physical MX65W running this build
+(`r0-7670f36`, kernel 6.18.55):
+
+- PoE PSE detected and bound at I2C `0x21`, 60 W budget, all fault registers
+  clear, both ports present
+- `apk` resolves against the snapshot feeds and installs packages
+- LuCI serves its login page over both LAN and the management subnet
+- Adblock returns `NXDOMAIN` for blocked domains and resolves allowed ones
+- LAN `192.168.88.0/24` with a working DHCP pool and NAT to WAN
+- Survives a clean reboot with all of the above intact
+
+PoE has **not** yet been verified delivering power to a real load. Confirm
+before relying on it.
 
 ## Hardware
 
@@ -62,6 +91,7 @@ problems at once.
 | LAN | `lan3`-`lan12` (10 ports) |
 | WAN | `wan1`, `wan2` |
 | PoE+ | `lan11`, `lan12` (30 W each, 60 W total budget) |
+| Wi-Fi | **MX65W only** - BCM43520, unsupported |
 | Serial | J5 header, 115200 8N1, 3.3 V |
 
 ### Ethernet layout
@@ -129,6 +159,24 @@ U-Boot matches on that string to boot from USB.
 
 See [docs/INSTALL.md](docs/INSTALL.md). The MX65 ships with a U-Boot that cannot
 boot Linux from NAND, so it must be replaced before OpenWrt can start.
+
+### Upgrading from an older snapshot
+
+If you are moving from a third-party PoE build (such as `r31914`) to a current
+snapshot, you will hit one non-obvious problem: current OpenWrt uses **ucode**
+LuCI instead of the older Lua implementation, and a preserved
+`/etc/config/uhttpd` carries a `lua_prefix` setting that breaks it.
+
+After upgrading, if LuCI returns an empty page:
+
+```sh
+uci delete uhttpd.main.lua_prefix
+uci commit uhttpd
+/etc/init.d/uhttpd restart
+```
+
+This is explained in full in
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#luci-returns-an-empty-page).
 
 ## How the PoE support works
 
