@@ -1,0 +1,19 @@
+{
+	"luci-app-poe": {
+		"description": "Grant ubus access to PoE port control",
+		"read": {
+			"ubus": {
+				"poe": [
+					"status"
+				]
+			}
+		},
+		"write": {
+			"ubus": {
+				"poe": [
+					"set"
+				]
+			}
+		}
+	}
+}

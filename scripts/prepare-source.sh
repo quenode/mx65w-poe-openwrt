@@ -79,11 +79,27 @@ print("    added kmod to meraki_mx65 DEVICE_PACKAGES")
 PY
 fi
 
+echo "==> Installing luci-app-poe (PoE web UI)"
+
+# The package is installed into package/ rather than into the luci feed
+# checkout on purpose: feeds/luci is a git clone, so anything added inside it
+# would show up as a local modification and could be discarded by
+# ./scripts/feeds update. Its Makefile includes feeds/luci/luci.mk by
+# absolute path instead of the usual relative ../../luci.mk.
+#
+# Rebuilt each run so edits here are always picked up.
+rm -rf package/luci-app-poe
+mkdir -p package/luci-app-poe
+cp -R "$HERE/luci-app-poe/." package/luci-app-poe/
+echo "    installed luci-app-poe into package/luci-app-poe"
+
 echo "==> Verifying"
 grep -q "ramdisk" "$TARGET/Makefile" \
 	|| echo "    WARNING: 'ramdisk' missing from FEATURES; initramfs will not build"
 grep -q CONFIG_PACKAGE_luci=y .config 2>/dev/null \
 	|| echo "    note: .config not applied yet (run: cp $HERE/config-meraki_mx65.config openwrt/.config)"
+grep -q CONFIG_PACKAGE_luci-app-poe=y "$HERE/config-meraki_mx65.config" \
+	|| echo "    WARNING: config does not select luci-app-poe; the PoE page will be missing"
 
 echo "==> Done. Next:"
 echo "    cp $HERE/config-meraki_mx65.config $OPENWRT/.config"

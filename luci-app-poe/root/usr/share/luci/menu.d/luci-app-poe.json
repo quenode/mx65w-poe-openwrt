@@ -1,0 +1,15 @@
+{
+	"admin/network/poe": {
+		"title": "PoE Ports",
+		"order": 45,
+		"action": {
+			"type": "view",
+			"path": "poe/main"
+		},
+		"depends": {
+			"acl": [
+				"luci-app-poe"
+			]
+		}
+	}
+}
