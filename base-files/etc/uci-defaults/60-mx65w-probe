@@ -1,0 +1,155 @@
+#!/bin/sh
+# First-boot setup for the MX65W radio diagnostic probe.
+#
+# This image is meant to be booted from USB as initramfs, which means it has
+# no persistent configuration: every boot starts from OpenWrt defaults. So
+# everything needed for remote access has to be re-applied on every boot, and
+# that is what this script does.
+#
+# Nothing here is suitable for a normal install. The static WAN address and the
+# wide-open rules are deliberate, and are scoped as narrowly as is practical.
+
+WAN_IP="${PROBE_WAN_IP:-192.168.99.125}"
+WAN_GW="${PROBE_WAN_GW:-192.168.99.3}"
+ADMIN_NET="${PROBE_ADMIN_NET:-192.168.99.0/24}"
+
+# --- admin access ---------------------------------------------------------
+# Set a root password. With initramfs there is no carried-over hash, and
+# passwordless root over the WAN is not something to leave lying around.
+uci -q batch <<EOF
+set dropbear.@dropbear[0].Port='22'
+set dropbear.@dropbear[0].Interface='wan lan'
+EOF
+
+# Permit SSH and LuCI from the admin network only, not from the internet at
+# large. These append to the zone's rule list rather than replacing anything.
+uci -q add firewall rule 2>/dev/null
+uci -q set firewall.@rule[-1].name='probe-ssh'
+uci -q set firewall.@rule[-1].src='wan'
+uci -q set firewall.@rule[-1].proto='tcp'
+uci -q set firewall.@rule[-1].dest_port='22'
+uci -q set firewall.@rule[-1].src_ip="$ADMIN_NET"
+uci -q set firewall.@rule[-1].target='ACCEPT'
+
+uci -q add firewall rule 2>/dev/null
+uci -q set firewall.@rule[-1].name='probe-luci'
+uci -q set firewall.@rule[-1].src='wan'
+uci -q set firewall.@rule[-1].proto='tcp'
+uci -q set firewall.@rule[-1].dest_port='80 443'
+uci -q set firewall.@rule[-1].src_ip="$ADMIN_NET"
+uci -q set firewall.@rule[-1].target='ACCEPT'
+
+# ttyd listens on 7681; expose it to the admin network too so the web terminal
+# is usable without guessing which port to forward.
+uci -q add firewall rule 2>/dev/null
+uci -q set firewall.@rule[-1].name='probe-ttyd'
+uci -q set firewall.@rule[-1].src='wan'
+uci -q set firewall.@rule[-1].proto='tcp'
+uci -q set firewall.@rule[-1].dest_port='7681'
+uci -q set firewall.@rule[-1].src_ip="$ADMIN_NET"
+uci -q set firewall.@rule[-1].target='ACCEPT'
+
+# --- addressing -----------------------------------------------------------
+# Static WAN so the probe lands on a known address. The production firmware
+# lives on NAND and is not running while the probe boots, so the address the
+# production install normally uses is free.
+uci -q batch <<EOF
+set network.wan=interface
+set network.wan.proto='static'
+set network.wan.ipaddr='$WAN_IP'
+set network.wan.gateway='$WAN_GW'
+set network.wan.netmask='255.255.255.0'
+
+set network.lan.proto='static'
+set network.lan.ipaddr='192.168.88.1'
+set network.lan.netmask='255.255.255.0'
+EOF
+
+uci -q commit network
+uci -q commit firewall
+uci -q commit dropbear
+
+/etc/init.d/network restart 2>/dev/null
+
+# --- diagnostics ----------------------------------------------------------
+# Collect the radio report a couple of minutes after boot, once the network
+# and PCIe probing have settled. Written to /tmp and, best effort, to the USB
+# stick so it survives a reboot if remote access fails.
+(
+	sleep 120
+
+	OUT=/tmp/radio-diag.txt
+	{
+		echo "=== MX65W radio probe ==="
+		date
+		echo
+		echo "=== board / firmware ==="
+		cat /tmp/sysinfo/board_name 2>/dev/null
+		cat /etc/openwrt_release 2>/dev/null
+		uname -a
+
+		echo
+		echo "=== PCI devices (the key question) ==="
+		lspci -nn 2>/dev/null || echo "lspci unavailable"
+
+		echo
+		echo "=== PCI devices under /sys/bus/pci/devices ==="
+		for d in /sys/bus/pci/devices/*; do
+			[ -e "$d/vendor" ] || continue
+			echo "-- $(basename "$d")"
+			echo "   vendor  $(cat "$d/vendor" 2>/dev/null)"
+			echo "   device  $(cat "$d/device" 2>/dev/null)"
+			echo "   class   $(cat "$d/class" 2>/dev/null)"
+			echo "   driver  $(basename "$(readlink "$d/driver" 2>/dev/null)" 2>/dev/null)"
+			echo "   link    $(cat "$d/current_link_speed" 2>/dev/null)x$(cat "$d/current_link_width" 2>/dev/null)"
+		done
+
+		echo
+		echo "=== PCIe host bridge ==="
+		dmesg | grep -iE "pcie|PCIe" | head -40
+
+		echo
+		echo "=== brcmfmac ==="
+		lsmod | grep -iE "brcm|80211" || echo "  not loaded"
+		dmesg | grep -i brcmfmac | head -40
+
+		echo
+		echo "=== wireless interfaces ==="
+		iw dev 2>/dev/null || echo "  iw unavailable"
+		ip -br link 2>/dev/null
+
+		echo
+		echo "=== rfkill ==="
+		rfkill list 2>/dev/null || echo "  rfkill unavailable"
+
+		echo
+		echo "=== PHY / antenna ==="
+		for n in phy0 phy1; do
+			[ -d /sys/class/ieee80211/$n ] && echo "  $n present"
+		done
+		ls /sys/class/ieee80211/ 2>/dev/null
+
+		echo
+		echo "=== PoE still working? ==="
+		ls /sys/class/poe/ 2>/dev/null
+		cat /sys/class/poe/port0/status 2>/dev/null
+		cat /sys/class/poe/port0/power 2>/dev/null
+
+		echo
+		echo "=== network ==="
+		ip -br addr 2>/dev/null
+		ip route 2>/dev/null
+	} > "$OUT" 2>&1
+
+	# Best effort: copy to the boot stick so the report can be collected
+	# physically if remote access never comes up.
+	for m in /mnt/* /media/*; do
+		[ -d "$m" ] || continue
+		if cp "$OUT" "$m/radio-diag.txt" 2>/dev/null; then
+			echo "radio report copied to $m" >> "$OUT"
+			break
+		fi
+	done
+) &
+
+exit 0

@@ -20,11 +20,18 @@ TARGET="target/linux/bcm53xx"
 # this. Be aware that the driver is ported against specific kernel APIs, so a
 # large jump in kernel version may need the porting work redone.
 OPENWRT_REV=${MERAKI_OPENWRT_REV:-7670f36e38fce4105f96b6fdc07350ea65ac8dca}
+SHORT_REV=$(printf '%s' "$OPENWRT_REV" | cut -c1-12)
 
 if [ ! -d "$OPENWRT" ]; then
-	echo "==> Cloning OpenWrt at ${OPENWRT_REV%%????????????????????????????????????????} (this takes a few minutes)"
-	git clone https://github.com/openwrt/openwrt.git "$OPENWRT"
-	git -C "$OPENWRT" checkout --quiet "$OPENWRT_REV"
+	echo "==> Cloning OpenWrt at $SHORT_REV"
+	echo "    (shallow, single commit - a few minutes)"
+	# Fetch just the one commit rather than the full history. OpenWrt's
+	# repository is large and we need exactly one tree from it.
+	mkdir -p "$OPENWRT"
+	git -C "$OPENWRT" init --quiet
+	git -C "$OPENWRT" remote add origin https://github.com/openwrt/openwrt.git
+	git -C "$OPENWRT" fetch --quiet --depth 1 origin "$OPENWRT_REV"
+	git -C "$OPENWRT" checkout --quiet --detach FETCH_HEAD
 fi
 
 cd "$OPENWRT"
@@ -169,6 +176,25 @@ mkdir -p "$TARGET/base-files/etc/uci-defaults"
 install -m 0755 "$HERE/base-files/etc/uci-defaults/50-mx65-network" \
 	"$TARGET/base-files/etc/uci-defaults/50-mx65-network"
 echo "    installed first-boot network defaults"
+
+# MX65W radio probe only: opens SSH/LuCI/ttyd to the admin network, pins a
+# static WAN address so the probe is reachable at a known IP, and schedules a
+# radio diagnostic dump. Not suitable for a normal install.
+if [ -f "$HERE/base-files/etc/uci-defaults/60-mx65w-probe" ]; then
+	install -m 0755 "$HERE/base-files/etc/uci-defaults/60-mx65w-probe" \
+		"$TARGET/base-files/etc/uci-defaults/60-mx65w-probe"
+	echo "    installed MX65W probe first-boot setup"
+fi
+
+# The probe boots with no password and is reachable over the WAN, so it needs
+# one. Generated, not committed - see .gitignore.
+if [ -n "$PROBE_ROOT_HASH" ] && [ -f "$HERE/base-files/etc/uci-defaults/61-probe-password" ]; then
+	install -m 0755 "$HERE/base-files/etc/uci-defaults/61-probe-password" \
+		"$TARGET/base-files/etc/uci-defaults/61-probe-password"
+	echo "    installed probe root password"
+else
+	echo "    note: PROBE_ROOT_HASH unset, probe image will have NO root password"
+fi
 
 echo "==> Installing luci-app-poe (PoE web UI)"
 

@@ -42,3 +42,7 @@ bcm_poe.c.ref
 # Python
 __pycache__/
 *.pyc
+
+# Probe image root password. Contains a password hash and is generated at
+# build time, never committed.
+base-files/etc/uci-defaults/61-probe-password
