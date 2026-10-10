@@ -6,6 +6,26 @@ build.log
 # Working reference trees used during development
 /dimmadont/
 
+# Cisco's GPL firmware bundle and anything unpacked from it.
+# These live next to the build tree on the maintainer's machine and must
+# never be committed or attached to a release. The one file we actually
+# need from them (the PSE firmware blob) is tracked deliberately as
+# driver/bcm59111.bin with its provenance recorded in driver/README.md.
+/meraki-gpl/
+/meraki-gpl.tar.bz2
+meraki-gpl/
+
+# Router backups. These contain /etc/shadow and the dropbear SSH host
+# private keys, which must never be published.
+/backup-*.tar.gz
+*.tar.gz
+
+# Built firmware images and release staging. Published as GitHub release
+# assets, not committed.
+/bin/
+*.initramfs.bin
+*.sysupgrade.bin
+
 # Scratch files
 *.ref
 *.orig

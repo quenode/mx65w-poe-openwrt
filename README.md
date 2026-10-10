@@ -1,5 +1,8 @@
 # OpenWrt with PoE for Cisco Meraki MX65 / MX65W
 
+[![Verify](https://github.com/quenode/mx65w-poe-openwrt/actions/workflows/verify.yml/badge.svg)](https://github.com/quenode/mx65w-poe-openwrt/actions/workflows/verify.yml)
+[![License: GPL-2.0](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](LICENSE)
+
 Community OpenWrt firmware for the Cisco Meraki MX65 and MX65W that keeps
 **native PoE** working while staying on **current upstream snapshots**, so the
 normal package manager (`apk`) keeps working.
@@ -7,6 +10,29 @@ normal package manager (`apk`) keeps working.
 Upstream OpenWrt supports the MX65 as a plain router, but it has **no support for
 the Broadcom BCM59111 PSE** that drives the two PoE+ ports. This project ports
 that driver forward to current kernels and packages it as an installable module.
+
+## Downloading
+
+Prebuilt images are published on the
+[releases page](https://github.com/quenode/mx65w-poe-openwrt/releases). Two
+profiles are built from the same source tree:
+
+| Profile | Device tree | Use it for |
+|---|---|---|
+| `meraki_mx65` | MX65 | Normal operation. PoE works. |
+| `meraki_mx65w` | MX65W | Diagnostic only — enables PCIe so the radios can be enumerated. |
+
+Both include the PoE driver, the LuCI PoE page (`Network → PoE Ports`), and a web
+terminal (`Services → Terminal`). A fresh image also applies the documented
+network defaults on first boot, so it comes up on `192.168.88.0/24` without
+manual `uci` commands.
+
+Verify every download against the `sha256sums` asset published alongside it. The
+release workflow re-checks the published checksums and confirms each initramfs
+is a structurally valid FIT image.
+
+Building from source is fully supported and gives you the same result — see
+[Building](#building).
 
 ## Why this exists
 
@@ -62,6 +88,7 @@ problems at once.
 | [docs/NETWORK.md](docs/NETWORK.md) | LAN/WAN setup, DHCP, firewall, handover |
 | [docs/POE.md](docs/POE.md) | How PoE works and how to read port state |
 | [docs/WIFI.md](docs/WIFI.md) | Why the MX65W radios cannot be used |
+| [docs/MX65W-PROBE.md](docs/MX65W-PROBE.md) | Diagnostic build that enables PCIe to enumerate the radios |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common faults and their fixes |
 
 ## Verified on hardware
@@ -147,13 +174,20 @@ make -C openwrt -j"$(nproc)"
 openwrt/bin/targets/bcm53xx/generic/
 |-- openwrt-<version>-bcm53xx-generic-meraki_mx65-initramfs.bin
 |-- openwrt-<version>-bcm53xx-generic-meraki_mx65-squashfs-sysupgrade.bin
-'-- openwrt-<version>-bcm53xx-generic-meraki_mx65-squashfs-sysupgrade.tar
+|-- openwrt-<version>-bcm53xx-generic-meraki_mx65w-initramfs.bin
+'-- openwrt-<version>-bcm53xx-generic-meraki_mx65w-squashfs-sysupgrade.bin
 ```
+
+Both profiles are produced by the same source tree; select which one you want
+with `config-meraki_mx65.config` or `config-meraki_mx65w-probe.config`.
 
 Verify downloads with the `sha256sums` file in the same directory.
 
-The initramfs image **must keep the exact filename shown above**. The replacement
-U-Boot matches on that string to boot from USB.
+The initramfs image **must keep the exact filename shown above**, and for USB
+booting that name is `openwrt-bcm53xx-generic-meraki_mx65-initramfs.bin`. The
+replacement U-Boot matches on that exact string and has no `mx65w` entry, so a
+renamed MX65W image will silently not be found. See
+[docs/MX65W-PROBE.md](docs/MX65W-PROBE.md).
 
 ## Installing
 

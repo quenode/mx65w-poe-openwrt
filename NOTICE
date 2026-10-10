@@ -1,0 +1,68 @@
+mx65w-poe-openwrt
+=================
+
+Copyright (C) 2026 mx65w-poe-openwrt contributors
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License version 2 as published by the Free
+Software Foundation. The full text is in the LICENSE file.
+
+
+Third-party material
+--------------------
+
+This project contains material derived from Cisco Systems' GPL firmware release
+for the Meraki MX64/MX65, available at:
+
+    https://dl.meraki.net/wired-14-39-mx64-20190426.tar.bz2
+
+Cisco publishes that release under GPL-2.0. The following files are derived from
+it and are redistributed under the same licence:
+
+    driver/bcm59111.c      PoE (PSE) driver. Original driver copyright:
+                           Timothy Passaro and Cisco Systems, Inc. Substantially
+                           rewritten for current kernel APIs by this project's
+                           contributors.
+
+    driver/bcm59111.bin    PSE firmware blob loaded by the driver over I2C.
+                           Redistributed unmodified. Provenance recorded in
+                           driver/README.md, which serves as its notice.
+
+Per-file provenance is also recorded in the header of driver/bcm59111.c.
+
+
+Modifications to derived material
+---------------------------------
+
+The following changes were made to the original BCM59111 driver. They are
+listed because GPL-2.0 requires that modified versions carry prominent notices
+stating that they were changed:
+
+  - ported the i2c probe path to the device-tree based of_match_table flow
+  - replaced __devinitdata, __devexit and remove_new, all removed upstream
+  - class_create() lost its THIS_MODULE argument
+  - CURRENT_TIME_SEC replaced with ktime_get_real_seconds()
+  - sysfs permissions on power-control attributes tightened from 0222/0666 to
+    0220/0664, because the driver exposes power control and world-writable
+    attributes would let any local user cut power to attached devices
+  - added a compatible with a device-tree node, so the controller is described
+    in bcm958625-meraki-alamo.dtsi rather than by hardcoded register access
+
+Because driver/bcm59111.c is a derivative work, it remains under GPL-2.0-only.
+
+
+Trademarks
+----------
+
+Cisco, Meraki, MX65 and MX65W are trademarks of Cisco Systems, Inc. This project
+is not affiliated with, sponsored by, or endorsed by Cisco Systems, Inc. The
+names are used only to identify the hardware this software targets and the
+provenance of the derived driver.
+
+
+Third-party dependencies
+------------------------
+
+This project builds on OpenWrt and LuCI, which are licensed under GPL-2.0 and
+Apache-2.0 respectively. Neither is included here; they are fetched during the
+build by scripts/prepare-source.sh.

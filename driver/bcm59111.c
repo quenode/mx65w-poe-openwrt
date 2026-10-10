@@ -1,3 +1,51 @@
+/*
+ * bcm59111.c - driver for the Broadcom BCM59111 PoE PSE controller
+ *
+ * SPDX-License-Identifier: GPL-2.0-only
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2 as published
+ * by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ *
+ * ---------------------------------------------------------------------------
+ * Provenance and attribution
+ * ---------------------------------------------------------------------------
+ *
+ * Derived from drivers/hwmon/bcm59111.c in Cisco Systems' GPL firmware
+ * release for the Meraki MX64/MX65:
+ *
+ *   https://dl.meraki.net/wired-14-39-mx64-20190426.tar.bz2
+ *
+ * Original driver copyright: Timothy Passaro and Cisco Systems, Inc.
+ *
+ * Modified for current kernels by this project's contributors - see the
+ * repository history and the Credits section of README.md. The substantive
+ * changes are:
+ *
+ *   - port the i2c probe path to the device-tree based of_match_table flow
+ *   - replace __devinitdata / __devexit / remove_new, all removed upstream
+ *   - class_create() lost its THIS_MODULE argument
+ *   - CURRENT_TIME_SEC replaced with ktime_get_real_seconds()
+ *   - tighten sysfs permissions from 0222/0666 to 0220/0664, because this
+ *     driver exposes power control and world-writable attributes would let
+ *     any local user cut power to attached devices
+ *
+ * Because this is a derivative work, it remains under GPL-2.0. The firmware
+ * blob loaded by the driver (bcm59111.bin) originates from the same Cisco
+ * release and carries the same license.
+ *
+ * Cisco, Meraki and MX65 are trademarks of Cisco Systems, Inc. This file is
+ * not affiliated with or endorsed by Cisco Systems, Inc.
+ */
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/io.h>

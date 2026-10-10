@@ -1,0 +1,158 @@
+name: Verify release artifacts
+
+# The release images are firmware: a corrupted or mismatched image bricks a
+# router. This workflow checks the published assets against the checksums the
+# repository claims, and re-verifies the source tree assumptions that the build
+# depends on.
+#
+# It deliberately does NOT build the firmware. An OpenWrt build needs a
+# cross-compiler, feeds, and roughly half an hour; that belongs on a builder,
+# not in a pull request check.
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-checks:
+    name: Source tree checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell scripts are valid
+        run: |
+          set -e
+          find . -path ./openwrt -prune -o -name '*.sh' -print0 |
+            while IFS= read -r -d '' f; do
+              echo "  sh -n $f"
+              sh -n "$f"
+            done
+
+      - name: prepare-source.sh is idempotent
+        # The build depends on running this twice producing no second change.
+        # A regression here once made the MX65W profile silently vanish.
+        run: |
+          set -e
+          # shellcheck disable=SC1091
+          ./scripts/prepare-source.sh > /tmp/first.log 2>&1
+          git diff --stat -- target/linux/bcm53xx/image/Makefile \
+                            target/linux/bcm53xx/modules.mk \
+                         > /tmp/diff-first.txt
+          ./scripts/prepare-source.sh > /tmp/second.log 2>&1
+          git diff --stat -- target/linux/bcm53xx/image/Makefile \
+                            target/linux/bcm53xx/modules.mk \
+                         > /tmp/diff-second.txt
+          diff /tmp/diff-first.txt /tmp/diff-second.txt
+          echo "  second run made no additional change"
+
+      - name: Both device profiles are present
+        run: |
+          set -e
+          makefile=target/linux/bcm53xx/image/Makefile
+          for profile in meraki_mx65 meraki_mx65w; do
+            grep -q "Device/$profile" "$makefile" \
+              || { echo "::error::missing Device/$profile"; exit 1; }
+            grep -q "TARGET_DEVICES += $profile" "$makefile" \
+              || { echo "::error::$profile not in TARGET_DEVICES"; exit 1; }
+          done
+          # PoE must be on both; only the W variant gets brcmfmac.
+          test "$(grep -c 'DEVICE_PACKAGES += kmod-hwmon-bcm59111' "$makefile")" -eq 2
+          grep -q 'DEVICE_PACKAGES += kmod-brcmfmac' "$makefile"
+
+      - name: Both configs select the required packages
+        run: |
+          set -e
+          for cfg in config-meraki_mx65.config config-meraki_mx65w-probe.config; do
+            for sym in CONFIG_PACKAGE_luci=y \
+                       CONFIG_PACKAGE_luci-app-poe=y \
+                       CONFIG_PACKAGE_ttyd=y \
+                       CONFIG_PACKAGE_luci-app-ttyd=y \
+                       CONFIG_PACKAGE_kmod-hwmon-bcm59111=y; do
+              grep -q "^$sym" "$cfg" \
+                || { echo "::error::$cfg does not select $sym"; exit 1; }
+            done
+          done
+          # The Wi-Fi probe additionally needs the wireless stack.
+          for sym in CONFIG_PACKAGE_kmod-brcmfmac=y \
+                     CONFIG_PACKAGE_kmod-cfg80211=y \
+                     CONFIG_PACKAGE_kmod-brcmutil=y; do
+            grep -q "^$sym" config-meraki_mx65w-probe.config \
+              || { echo "::error::probe config does not select $sym"; exit 1; }
+          done
+
+      - name: Derived driver carries its licence notice
+        # GPL-2.0 requires per-file notices on Cisco-derived material. A
+        # top-level LICENSE is not sufficient.
+        run: |
+          set -e
+          head -20 driver/bcm59111.c | grep -q 'SPDX-License-Identifier: GPL-2.0-only' \
+            || { echo "::error::driver/bcm59111.c has no SPDX header"; exit 1; }
+          head -20 driver/bcm59111.c | grep -qi 'cisco' \
+            || { echo "::error::driver/bcm59111.c does not record Cisco provenance"; exit 1; }
+          test -f driver/README.md \
+            || { echo "::error::driver/README.md missing (blob provenance)"; exit 1; }
+
+      - name: No Cisco firmware bundle committed
+        run: |
+          set -e
+          if git ls-files | grep -qiE '^meraki-gpl|meraki-gpl\.tar'; then
+            echo "::error::Cisco GPL bundle is tracked; it must not be published"
+            exit 1
+          fi
+          if git ls-files | grep -qE '\.tar\.gz$'; then
+            echo "::error::a tarball is tracked; router backups contain SSH host keys"
+            exit 1
+          fi
+
+      - name: No obvious secrets in tracked files
+        run: |
+          set -e
+          if git grep -nIE '(BEGIN [A-Z ]*PRIVATE KEY|shadow[^:]*:[^:]*:[^:]+\$)' \
+                -- . ':!docs/*' ':!CONTRIBUTING.md' ':!SECURITY.md'; then
+            echo "::error::possible secret in tracked files"
+            exit 1
+          fi
+          echo "  clean"
+
+  release-artifacts:
+    name: Release image checksums
+    runs-on: ubuntu-latest
+    needs: source-checks
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate the release assets
+        id: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          gh release download "$GITHUB_REF_NAME" --dir /tmp/assets
+          ls -l /tmp/assets
+
+      - name: Verify SHA256 checksums
+        run: |
+          set -e
+          cd /tmp/assets
+          test -f sha256sums || { echo "::error::release has no sha256sums"; exit 1; }
+          sha256sum -c sha256sums
+
+      - name: Sanity-check image sizes and types
+        run: |
+          set -e
+          cd /tmp/assets
+          for f in *.initramfs.bin; do
+            test -s "$f" || { echo "::error::$f is empty"; exit 1; }
+            # FIT images start with the 0xd00dfeed magic.
+            magic=$(head -c 4 "$f" | xxd -p)
+            [ "$magic" = "d00dfeed" ] \
+              || { echo "::error::$f is not a FIT image (magic $magic)"; exit 1; }
+          done
+          echo "  all initramfs images are valid FIT images"

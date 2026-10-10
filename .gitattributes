@@ -1,0 +1,22 @@
+# Normalise line endings in the working tree.
+#
+# The kernel patches in patches/ are applied with `patch`, and a stray CRLF
+# will make them fail to apply on a Windows clone. Shell scripts break on CRLF
+# too, because the kernel will not find the interpreter when the shebang is
+# followed by a carriage return.
+* text=auto eol=lf
+
+# Binary files must never be line-ending converted or diffed.
+*.bin   binary
+*.bz2   binary
+*.gz    binary
+*.png   binary
+*.jpg   binary
+*.apk   binary
+*.ipk   binary
+*.initramfs.bin   binary
+*.sysupgrade.bin  binary
+
+# Patches are already unix-formatted by definition.
+*.patch -diff
+*.diff  -diff
