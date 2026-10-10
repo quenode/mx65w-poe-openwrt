@@ -11,7 +11,28 @@ are named after the snapshot revision they were built from (for example
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+Three driver bugs, each of which silently reported a wrong value rather than
+failing. Full detail in `docs/POE.md`.
+
+- **`status` no longer duplicates `enabled`.** Both were defined with the same
+  register, mask and bit offset, so `status` only ever echoed the enable bit
+  and could not report whether a device was attached. It now reads the detect
+  field of `POE_STATP` and reports `unknown`/`short`/`cpd_high`/`rsig_low`/
+  `good`/`rsig_high`/`open`.
+- **`detect_state[]` corrected.** It had six strings for seven `DETECT_*`
+  values, so `DETECT_OPEN` read past the end of the array, and index 5 was
+  labelled `"open"` when it is `DETECT_RSIG_HIGH`. Wiring up `status` without
+  fixing this would have converted a wrong value into an out-of-bounds read.
+- **`millijoules` is now cumulative and in real millijoules.** It previously
+  reported `power_mw * jiffies_since_last_read` - wrong by a factor of
+  `1000/HZ`, and reset on every read, so the figure depended on polling
+  frequency rather than consumption. There is no hardware energy register on
+  this chip, so a one-second timer accumulates the total instead.
+- `luci-app-poe` again reports the detection state and energy total now that
+  both are trustworthy. It previously derived attachment from `mode` and
+  omitted energy entirely.
 
 ## [1.0.0] - 2026-10-10
 

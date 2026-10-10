@@ -52,6 +52,8 @@
 #include <linux/i2c.h>
 #include <linux/init.h>
 #include <linux/jiffies.h>
+#include <linux/math64.h>
+#include <linux/workqueue.h>
 #include <linux/kernel.h>
 #include <linux/mii.h>
 #include <linux/module.h>
@@ -123,7 +125,8 @@ static char *mode[] = { "UNK", "AT", "AT", "AT", "AT", "RESV", "AF", "OC" };
 #define DETECT_OPEN      0x6
 
 char *detect_state[] = { "unknown",  "short", "cpd_high",
-			 "rsig_low", "good",  "open" };
+			 "rsig_low", "good",  "rsig_high",
+			 "open" };
 
 #define CLASS_UNKNOWN 0x0
 #define CLASS_CLASS_1 0x1
@@ -289,9 +292,32 @@ char *detect_state[] = { "unknown",  "short", "cpd_high",
 	POE_ATTR_RO_FUNC(_name, (_reg + (dev->devt * _regoff)), (_bits), \
 			 (_bitoff), POE_PRINT_STR(_name), device)
 
+/*
+ * As DEV_STR_RD, but the string table is named explicitly.
+ *
+ * DEV_STR_RD derives the table from the attribute name, so it can only report
+ * a global array that happens to share that name. That is why the `status`
+ * attribute below needs this form: it reports detect_state[].
+ */
+#define DEV_STR_ARRAY_RD(_name, _strs, _reg, _regoff, _bits, _bitoff)    \
+	POE_ATTR_RO_FUNC(_name, (_reg + (dev->devt * _regoff)), (_bits), \
+			 (_bitoff), POE_PRINT_STR(_strs), device)
+
 struct bcm_poe_dev {
 	struct device *ports[POE_MAX_PORT];
-	uint32_t last_joule_time[POE_MAX_PORT];
+	/*
+	 * Cumulative energy per port, in millijoules.
+	 *
+	 * Maintained by bcm_poe_energy_tick() rather than being derived on
+	 * read. Computing it in the sysfs show path meant the result covered
+	 * only the interval since the attribute was last read, so the value
+	 * changed with read frequency rather than with actual consumption.
+	 *
+	 * This lives in RAM, so it resets when the driver is unloaded or the
+	 * router reboots.
+	 */
+	u64 energy_mj[POE_MAX_PORT];
+	u32 last_energy_jiffies;
 	const struct i2c_client *client;
 	struct class *class;
 	struct device *pdev;
@@ -1765,13 +1791,70 @@ static u64 calculate_port_power_usage(int port)
 	return ret;
 }
 
+/*
+ * Cumulative energy accounting.
+ *
+ * calculate_port_power_usage() returns milliwatts, so energy is
+ * power_mW * elapsed_ms / 1000 to give millijoules.
+ *
+ * Sampling is driven by a timer rather than by sysfs reads. The previous
+ * implementation updated its timestamp inside the show path, which meant any
+ * period during which nobody read the attribute contributed nothing, and the
+ * reported figure depended on polling frequency rather than on consumption.
+ */
+#define POE_ENERGY_INTERVAL_MS 1000
+
+static void bcm_poe_energy_tick(struct work_struct *work);
+
+/* There is only ever one PSE on this platform, so a file-scope work is enough. */
+static DECLARE_DELAYED_WORK(poe_energy_work, bcm_poe_energy_tick);
+
+static void bcm_poe_energy_tick(struct work_struct *work)
+{
+	u32 now = jiffies;
+	u64 elapsed_ms = jiffies_to_msecs(now - poe.last_energy_jiffies);
+	u32 i;
+
+	if (elapsed_ms) {
+		for (i = 0; i < ARRAY_SIZE(poe.energy_mj) && i < poe.nports;
+		     i++) {
+			u64 mw = calculate_port_power_usage(i);
+
+			if (mw)
+				poe.energy_mj[i] += div64_u64(mw * elapsed_ms,
+							      1000);
+		}
+
+		poe.last_energy_jiffies = now;
+	}
+
+	mod_delayed_work(system_wq, &poe_energy_work,
+			 msecs_to_jiffies(POE_ENERGY_INTERVAL_MS));
+}
+
+static void bcm_poe_energy_start(void)
+{
+	u32 i;
+
+	for (i = 0; i < ARRAY_SIZE(poe.energy_mj); i++)
+		poe.energy_mj[i] = 0;
+
+	poe.last_energy_jiffies = jiffies;
+	schedule_delayed_work(&poe_energy_work,
+			      msecs_to_jiffies(POE_ENERGY_INTERVAL_MS));
+}
+
+static void bcm_poe_energy_stop(void)
+{
+	cancel_delayed_work_sync(&poe_energy_work);
+}
+
 static ssize_t millijoules_show(struct device *dev,
 				struct device_attribute *dev_attr, char *buf)
 {
-	s64 watts = calculate_port_power_usage(dev->devt);
-	uint32_t t = (jiffies - poe.last_joule_time[dev->devt]);
-	poe.last_joule_time[dev->devt] = jiffies;
-	return scnprintf(buf, PAGE_SIZE, "%llu\n", watts * t);
+	u64 mj = READ_ONCE(poe.energy_mj[dev->devt]);
+
+	return scnprintf(buf, PAGE_SIZE, "%llu\n", mj);
 }
 
 static ssize_t power_show(struct device *dev, struct device_attribute *dev_attr,
@@ -1868,8 +1951,17 @@ DEV_MATCH(underload, POE_STATP_BASE, POE_STATP_OFFSET, POE_STATP_DETECT_BITS,
 
 DEV_SHARED_RD(enabled, POE_STATPWR_REG, POE_NO_OFFSET, POE_SINGLE_BIT,
 	      POE_STATPWR_PORT_EN_OFF);
-DEV_SHARED_RD(status, POE_STATPWR_REG, POE_NO_OFFSET, POE_SINGLE_BIT,
-	      POE_STATPWR_PORT_EN_OFF);
+
+/*
+ * Detection state, from the detect field of POE_STATP.
+ *
+ * This used to be defined with the same register, mask and bit offset as
+ * `enabled` above, so it only ever echoed the enable bit and could not report
+ * whether a device was attached. The detect field is bits 0-2 of POE_STATP;
+ * `overload` and `underload` above already read it, via the match macros.
+ */
+DEV_STR_ARRAY_RD(status, detect_state, POE_STATP_BASE, POE_STATP_OFFSET,
+		 POE_STATP_DETECT_BITS, POE_STATP_DETECT_OFFSET);
 
 static struct device_attribute port_attrs[] = {
 	POE_ATTR_RO_AUTO(class),
@@ -1968,10 +2060,11 @@ static int bcm_poe_probe(struct i2c_client *cl)
 						       &(port_attrs[j])))
 					ret = -EPORTF;
 			}
-
-			poe.last_joule_time[i] = jiffies;
 		}
 	}
+
+	if (ret >= 0)
+		bcm_poe_energy_start();
 
 probe_failed:
 	if (ret < 0)
@@ -1982,6 +2075,7 @@ probe_failed:
 
 static void bcm_poe_remove(struct i2c_client *client)
 {
+	bcm_poe_energy_stop();
 	remove_sysfs_dirs();
 }
 

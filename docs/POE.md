@@ -85,35 +85,20 @@ done
 | Attribute | Meaning |
 |---|---|
 | `enabled` | 1 = port enabled, 0 = disabled. Writable. |
-| `status` | **Duplicate of `enabled`** - see Known driver bugs below. Do not read this as a detection state. |
+| `status` | Detection state: `unknown`, `short`, `cpd_high`, `rsig_low`, `good`, `rsig_high`, `open`. `good` means a valid device is present. |
 | `class` | Detected class, as a string: `unknown`, `1`, `2`, `3`, `4`, `reserved`, `0`, `overcurrent` |
 | `mode` | `UNK` (nothing attached), `AT` (802.3at), `AF` (802.3af), `OC` (overcurrent), `RESV` |
 | `power` | Measured power draw in **milliwatts** |
-| `millijoules` | **Not usable** - see Known driver bugs below |
+| `millijoules` | Cumulative energy in millijoules, accumulated by the driver. Resets on driver reload or reboot. |
 | `overload` / `underload` | Fault flags, matched against detect bits |
 | `denied` | Port refused power (class/exhausted budget) |
 
-### Mode is derived from class
-
-There is no independent mode register. `mode` is read from the same field as
-`class` and indexed through a second table, so it is really "the mode implied
-by the detected class". For the values that matter this is correct:
-
-| class | mode |
-|---|---|
-| `1`-`4` | `AT` |
-| `0` | `AF` |
-| `overcurrent` | `OC` |
-| `unknown` | `UNK` |
-
 ### Determining whether a device is attached
 
-Because `status` is unusable, presence must be inferred. The reliable signal is
-`mode`: the PSE reports anything other than `UNK` once it has classified a
-device. Measured `power` above zero is a useful cross-check, since it confirms
-power is actually being delivered rather than merely negotiated.
-
-That is exactly what `luci-app-poe` does - see `attached` in the ubus output.
+`status` is the direct answer: `good` means the PSE has detected a valid
+device. `luci-app-poe` uses that as its primary signal and falls back to the
+`mode` field and measured power as a cross-check, since a port can be
+classified and still be delivering nothing.
 
 ### Device-level fault flags
 
@@ -126,40 +111,58 @@ cat /sys/class/poe/poe0/uvlo_vcc      # undervoltage on VCC
 
 All four should read `0`.
 
-## Known driver bugs
+## Fixed driver bugs
 
-Three defects were confirmed by reading the driver source and comparing it
-against live hardware output. None is fixed yet; each needs a kernel rebuild
-and a `sysupgrade` to deploy.
+Three defects were found by comparing the driver source against live hardware.
+All three are now fixed; the history below is kept because each one silently
+reported a wrong value rather than failing loudly, which is the reason to record
+them.
 
-### 1. `status` is a duplicate of `enabled`
+### 1. `status` was a duplicate of `enabled` (fixed)
 
 ```c
 DEV_SHARED_RD(enabled, POE_STATPWR_REG, POE_NO_OFFSET, POE_SINGLE_BIT, POE_STATPWR_PORT_EN_OFF);
 DEV_SHARED_RD(status,  POE_STATPWR_REG, POE_NO_OFFSET, POE_SINGLE_BIT, POE_STATPWR_PORT_EN_OFF);
 ```
 
-Same register, same mask, same bit offset. `status` only ever echoes the
-enable bit and never reports a detection state. Observed on live hardware:
-`enabled=1` and `status=1` on a port running a 3 W PoE load.
+Same register, same mask, same bit offset. `status` only ever echoed the enable
+bit. On live hardware it read `1` on a port running a 3 W load.
 
-The detect state lives in `POE_STATP` and is reachable through the
-`overload`/`underload` match attributes, so a corrected `status` would read
-`POE_STATP_DETECT_BITS` at `POE_STATP_DETECT_OFFSET`.
+It now reads the detect field of `POE_STATP`, which `overload` and `underload`
+were already reaching:
 
-### 2. `detect_state[]` is dead, undersized, and mislabelled
+```c
+DEV_STR_ARRAY_RD(status, detect_state, POE_STATP_BASE, POE_STATP_OFFSET,
+		 POE_STATP_DETECT_BITS, POE_STATP_DETECT_OFFSET);
+```
+
+`DEV_STR_ARRAY_RD` is a new macro. The existing `DEV_STR_RD` derives its string
+table from the attribute name, so it can only report a global array that happens
+to share that name; `status` needs to report `detect_state[]`.
+
+### 2. `detect_state[]` was dead, undersized and mislabelled (fixed)
 
 ```c
 char *detect_state[] = { "unknown", "short", "cpd_high", "rsig_low", "good", "open" };
 ```
 
-Six strings for seven `DETECT_*` values (`DETECT_OPEN` is `0x6`), so index 6
-reads past the end of the array. Index 5 is labelled `"open"` when
-`DETECT_RSIG_HIGH` is what it represents. The array is currently never
-referenced, so nothing is broken at runtime - but wiring it up to fix bug 1
-without also correcting it would introduce an out-of-bounds read.
+Six strings for seven `DETECT_*` values, so `DETECT_OPEN` (0x6) read past the end
+of the array, and index 5 was labelled `"open"` when it is `DETECT_RSIG_HIGH`.
 
-### 3. `millijoules` is neither millijoules nor cumulative
+This was dead code, so nothing was broken at runtime - but fixing bug 1 without
+fixing this would have turned a wrong value into an out-of-bounds read. The
+array now matches the enum exactly:
+
+```c
+char *detect_state[] = { "unknown",  "short", "cpd_high",
+			 "rsig_low", "good",  "rsig_high",
+			 "open" };
+```
+
+The detect field is three bits wide, so the printed formatter's `ARRAY_SIZE`
+guard covers the remaining value (7) and reports `ERR`.
+
+### 3. `millijoules` was neither millijoules nor cumulative (fixed)
 
 ```c
 static ssize_t millijoules_show(...)
@@ -171,16 +174,26 @@ static ssize_t millijoules_show(...)
 }
 ```
 
-`calculate_port_power_usage()` returns milliwatts, and `t` is in jiffies, so
-the result is `mW x jiffies` - no conversion to any energy unit. Worse,
-`last_joule_time` is reset on every read, so the value covers only the interval
-since the attribute was last read. Reading it twice in quick succession gives
-a small number; reading it after a long gap gives a huge one. On live hardware
-it was observed jumping from `80105333328` to `108865200` with no change in
-what was plugged in.
+Two separate faults. `calculate_port_power_usage()` returns **milliwatts**, and
+`t` is in **jiffies**, so the result was `mW x jiffies` with no conversion to any
+energy unit - off by a factor of 1000/HZ. For one second at 3.084 W it reported
+308400 instead of 3084 mJ. And because `last_joule_time` was reset inside the
+show path, any period during which nobody read the attribute contributed
+nothing, so the figure depended on polling frequency rather than consumption. It
+was observed jumping from `80105333328` to `108865200` with nothing unplugged.
 
-This is why `luci-app-poe` does not expose it. Any figure it reported would
-change every time the page polled.
+There is no hardware energy register to read - the counters at 0x60-0x63 are
+fault counters (invalid signature, power denied, over/short, MPS). So the total
+is accumulated in software, sampled on a one-second timer rather than on read:
+
+```c
+poe.energy_mj[i] += div64_u64(mw * elapsed_ms, 1000);
+```
+
+The timer keeps running whether or not anyone reads the attribute, so the total
+no longer depends on who is polling. It is held in RAM and therefore resets on
+driver reload or reboot; that is inherent to not having a hardware counter, and
+is stated rather than hidden.
 
 ## The LuCI page
 
@@ -267,9 +280,6 @@ attached devices.
 
 ## Known issues
 
-- **Three driver bugs are documented above and unfixed.** `status` duplicates
-  `enabled`, `detect_state[]` is dead and undersized, and `millijoules` is
-  meaningless. Fixing them requires a kernel rebuild and a `sysupgrade`.
 - **Not upstream.** This driver has never been merged into OpenWrt, so it
   receives no review and carries no support guarantee.
 - **PoE does not persist across a full power cycle reliably** on some units;
@@ -278,6 +288,8 @@ attached devices.
   only the global budget is exposed.
 - **Thermal shutdown** behaviour is untested under sustained full load. Test
   before deploying anything that matters.
+- **Energy totals are RAM-only** and reset on driver reload or reboot. The
+  BCM59111 has no energy register; the counters it does have are fault counters.
 - **Raw register access is exposed** at `/sys/class/poe/poe0/reg` and
   `reg_arg`. These bypass every safety check in the driver. `luci-app-poe`
   deliberately ignores them.

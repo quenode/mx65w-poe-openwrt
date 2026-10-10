@@ -61,17 +61,8 @@ function read_port(idx) {
 	let cls = rd_int(dir + '/class');
 	let mode = rd(dir + '/mode');
 	let power = rd_int(dir + '/power');
+	let status = rd(dir + '/status');
 
-	/*
-	 * `millijoules` is deliberately NOT exposed.
-	 *
-	 * The driver computes it as power_mw * jiffies_since_last_read and
-	 * resets last_joule_time on every read. That makes it neither
-	 * millijoules (no jiffies-to-seconds scaling) nor a cumulative total,
-	 * just an interval delta whose value depends entirely on how often the
-	 * attribute happens to be read. Surfacing it in a UI would report a
-	 * different, meaningless figure on every poll.
-	 */
 	let p = {
 		index: idx,
 		name: (idx < length(PORT_NAMES)) ? PORT_NAMES[idx] : sprintf('port%d', idx),
@@ -80,24 +71,37 @@ function read_port(idx) {
 		class: cls,
 		mode: mode,
 		power_mw: power,
+		/*
+		 * Cumulative energy in millijoules. Meaningful since the driver
+		 * was changed to accumulate on a timer; it used to report
+		 * power_mw * jiffies_since_last_read, which was neither the
+		 * right unit nor cumulative. Resets if the driver is reloaded
+		 * or the router reboots.
+		 */
+		millijoules: rd_int(dir + '/millijoules'),
 		overload: rd_int(dir + '/overload'),
 		underload: rd_int(dir + '/underload'),
 		denied: rd_int(dir + '/denied'),
 	};
 
 	/*
-	 * Attachment state.
+	 * Detection state, as reported by the PSE.
 	 *
-	 * The driver's `status` attribute cannot be used for this. It is
-	 * defined with the same register, mask and bit offset as `enabled`
-	 * (POE_STATPWR_REG / POE_SINGLE_BIT / POE_STATPWR_PORT_EN_OFF), so it
-	 * only echoes the enable bit and never reports detection. The detect
-	 * state in POE_STATP is reached only through the overload/underload
-	 * match attributes, so presence is derived from the mode field - which
-	 * the driver derives from the hardware class - with measured power as
-	 * a fallback.
+	 * `status` used to be defined with the same register, mask and bit
+	 * offset as `enabled`, so it merely echoed the enable bit and could
+	 * not report whether a device was attached. It now reads the detect
+	 * field of POE_STATP and yields one of unknown, short, cpd_high,
+	 * rsig_low, good, rsig_high, open.
+	 *
+	 * The derived `attached` below is kept as a cross-check, because a
+	 * port can be classified and still be delivering no power.
 	 */
-	p.attached = (mode != null && mode != 'UNK') || (power != null && power > 0);
+	p.status_raw = status;
+	p.detected = (status == 'good');
+
+	p.attached = p.detected ||
+	             (mode != null && mode != 'UNK') ||
+	             (power != null && power > 0);
 
 	/* friendly class label, e.g. "4" -> "Class 4" */
 	if (cls != null && cls >= 0 && cls < length(CLASS_NAMES))

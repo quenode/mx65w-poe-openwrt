@@ -25,6 +25,20 @@ function fmtPower(mw) {
 	return (mw / 1000).toFixed(2) + ' W';
 }
 
+function fmtEnergy(mj) {
+	if (mj == null)
+		return '-';
+
+	var wh = mj / 3600000;
+
+	if (wh >= 1000)
+		return (wh / 1000).toFixed(2) + ' MWh';
+	if (wh >= 1)
+		return wh.toFixed(2) + ' kWh';
+
+	return Math.round(mj) + ' mJ';
+}
+
 function fmtBool(v) {
 	if (v == null)
 		return '-';
@@ -96,6 +110,7 @@ function renderPorts(st, onToggle) {
 			E('th', { 'class': 'th' }, [ _('Class') ]),
 			E('th', { 'class': 'th' }, [ _('Mode') ]),
 			E('th', { 'class': 'th' }, [ _('Power draw') ]),
+			E('th', { 'class': 'th' }, [ _('Energy') ]),
 			E('th', { 'class': 'th' }, [ _('Flags') ])
 		])
 	];
@@ -169,12 +184,15 @@ function renderPorts(st, onToggle) {
 			E('td', { 'class': 'td left' }, [ sw ]),
 			E('td', { 'class': 'td left' }, [
 				p.attached
-					? E('span', { 'class': 'label success' }, [ _('connected') ])
-					: E('span', { 'class': 'label' }, [ _('none') ])
+					? E('span', { 'class': 'label success' },
+						[ p.detected ? _('detected') : _('powered') ])
+					: E('span', { 'class': 'label' },
+						[ p.status_raw || _('none') ])
 			]),
 			E('td', { 'class': 'td left' }, [ p.class_label ]),
 			E('td', { 'class': 'td left' }, [ p.mode || '-' ]),
 			E('td', { 'class': 'td left' }, [ fmtPower(p.power_mw) ]),
+			E('td', { 'class': 'td left' }, [ fmtEnergy(p.millijoules) ]),
 			E('td', { 'class': 'td left' }, [ portFlags(p) ])
 		]));
 	});
