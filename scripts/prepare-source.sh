@@ -196,6 +196,27 @@ else
 	echo "    note: PROBE_ROOT_HASH unset, probe image will have NO root password"
 fi
 
+# Kernel config fragment for this target.
+#
+# The mx65w device tree enables the two iPROC PCIe controllers, but nothing
+# binds to them: the target ships CONFIG_PCIE_IPROC and CONFIG_PCIE_IPROC_BCMA
+# and explicitly leaves CONFIG_PCIE_IPROC_PLATFORM off. Only the BCMA variant
+# was built, and that binds to bcma_device rather than to the
+# "brcm,iproc-pcie" compatible used in the device tree. So the probe image
+# enabled PCIe with no driver present to drive it.
+#
+# PCIE_IPROC_PLATFORM is selectable on this target - ARCH_BCM_IPROC is already
+# set - it is only switched off in the shipped fragment.
+KCONF="$TARGET/config-${KERNEL_VER:-6.18}"
+if [ -f "$KCONF" ]; then
+	if grep -q '^# CONFIG_PCIE_IPROC_PLATFORM is not set' "$KCONF"; then
+		sed -i 's/^# CONFIG_PCIE_IPROC_PLATFORM is not set/CONFIG_PCIE_IPROC_PLATFORM=y/' "$KCONF"
+		echo "    enabled CONFIG_PCIE_IPROC_PLATFORM in $(basename "$KCONF")"
+	fi
+	grep -q '^CONFIG_PCIE_IPROC_PLATFORM=y' "$KCONF" \
+		|| echo "    WARNING: CONFIG_PCIE_IPROC_PLATFORM not enabled; PCIe will have no driver"
+fi
+
 echo "==> Installing luci-app-poe (PoE web UI)"
 
 # The package is installed into package/ rather than into the luci feed
