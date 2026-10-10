@@ -204,14 +204,21 @@ jobs:
           set -e
           cd /tmp/assets
           n=0
-          for f in *.initramfs.bin; do
-            test -s "$f" || { echo "::error::$f is empty"; exit 1; }
-            # FIT images start with the 0xd00dfeed magic.
-            magic=$(head -c 4 "$f" | xxd -p)
-            [ "$magic" = "d00dfeed" ] \
-              || { echo "::error::$f is not a FIT image (magic $magic)"; exit 1; }
+          # Note the separator: the files are named "...-initramfs.bin",
+          # not "....initramfs.bin". A glob of *.initramfs.bin matches nothing
+          # and silently reduces the loop to a single literal filename.
+          for f in *-initramfs.bin; do
+            test -s "$f" || { echo "::error::$f is empty or absent"; exit 1; }
+            # FIT images begin with the 0xd00dfeed magic. Read it with od from
+            # coreutils rather than xxd, which is not present on every runner
+            # image.
+            magic=$(od -An -tx1 -N4 "$f" | tr -d ' \n')
+            if [ "$magic" != "d00dfeed" ]; then
+              echo "::error::$f is not a FIT image (magic '$magic')"
+              exit 1
+            fi
             n=$((n + 1))
           done
-          [ "$n" -ge 2 ] \
-            || { echo "::error::expected both device profiles, found $n initramfs image(s)"; exit 1; }
+          [ "$n" -eq 2 ] \
+            || { echo "::error::expected 2 initramfs images (one per profile), found $n"; exit 1; }
           echo "  $n initramfs images, all valid FIT"
