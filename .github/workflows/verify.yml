@@ -37,24 +37,41 @@ jobs:
       - name: prepare-source.sh is idempotent
         # The build depends on running this twice producing no second change.
         # A regression here once made the MX65W profile silently vanish.
+        #
+        # openwrt/ is gitignored, so `git diff` cannot be used to detect the
+        # edits. Compare content hashes instead.
         run: |
           set -e
-          # shellcheck disable=SC1091
           ./scripts/prepare-source.sh > /tmp/first.log 2>&1
-          git diff --stat -- target/linux/bcm53xx/image/Makefile \
-                            target/linux/bcm53xx/modules.mk \
-                         > /tmp/diff-first.txt
+
+          MK=openwrt/target/linux/bcm53xx/image/Makefile
+          MODULES=openwrt/target/linux/bcm53xx/modules.mk
+
+          for f in "$MK" "$MODULES"; do
+            test -f "$f" || { echo "::error::$f was not generated"; exit 1; }
+          done
+
+          sha256sum "$MK" "$MODULES" > /tmp/hash-first.txt
+
+          # The uci-defaults and luci-app-poe files are re-copied every run,
+          # so only the *edited* files need to be idempotent.
           ./scripts/prepare-source.sh > /tmp/second.log 2>&1
-          git diff --stat -- target/linux/bcm53xx/image/Makefile \
-                            target/linux/bcm53xx/modules.mk \
-                         > /tmp/diff-second.txt
-          diff /tmp/diff-first.txt /tmp/diff-second.txt
+          sha256sum "$MK" "$MODULES" > /tmp/hash-second.txt
+
+          diff /tmp/hash-first.txt /tmp/hash-second.txt
           echo "  second run made no additional change"
+
+          # And no warnings should have been emitted.
+          if grep -q WARNING /tmp/first.log; then
+            echo "::error::prepare-source.sh emitted warnings:"
+            grep WARNING /tmp/first.log
+            exit 1
+          fi
 
       - name: Both device profiles are present
         run: |
           set -e
-          makefile=target/linux/bcm53xx/image/Makefile
+          makefile=openwrt/target/linux/bcm53xx/image/Makefile
           for profile in meraki_mx65 meraki_mx65w; do
             grep -q "Device/$profile" "$makefile" \
               || { echo "::error::missing Device/$profile"; exit 1; }
@@ -64,6 +81,18 @@ jobs:
           # PoE must be on both; only the W variant gets brcmfmac.
           test "$(grep -c 'DEVICE_PACKAGES += kmod-hwmon-bcm59111' "$makefile")" -eq 2
           grep -q 'DEVICE_PACKAGES += kmod-brcmfmac' "$makefile"
+
+      - name: The driver reached the build tree intact
+        run: |
+          set -e
+          src=driver/bcm59111.c
+          dst=openwrt/target/linux/bcm53xx/files/drivers/hwmon/bcm59111.c
+          test -f "$dst" || { echo "::error::driver not installed into target"; exit 1; }
+          # prepare-source.sh must copy verbatim, so the hashes must match.
+          a=$(sha256sum "$src" | cut -d' ' -f1)
+          b=$(sha256sum "$dst" | cut -d' ' -f1)
+          [ "$a" = "$b" ] || { echo "::error::installed driver differs from source"; exit 1; }
+          echo "  driver installed byte-identically"
 
       - name: Both configs select the required packages
         run: |
