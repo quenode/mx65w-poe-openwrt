@@ -121,12 +121,21 @@ jobs:
         # top-level LICENSE is not sufficient.
         run: |
           set -e
-          head -20 driver/bcm59111.c | grep -q 'SPDX-License-Identifier: GPL-2.0-only' \
+          head -5 driver/bcm59111.c | grep -q 'SPDX-License-Identifier: GPL-2.0-only' \
             || { echo "::error::driver/bcm59111.c has no SPDX header"; exit 1; }
-          head -20 driver/bcm59111.c | grep -qi 'cisco' \
+          # Provenance sits in the leading comment block, which is around 50
+          # lines - do not narrow the window or this silently stops checking.
+          sed -n '1,60p' driver/bcm59111.c | grep -qi 'cisco' \
             || { echo "::error::driver/bcm59111.c does not record Cisco provenance"; exit 1; }
+          # The original copyright must survive too, or the attribution is
+          # incomplete.
+          sed -n '1,60p' driver/bcm59111.c | grep -qi 'passaro' \
+            || { echo "::error::driver/bcm59111.c does not credit the original author"; exit 1; }
           test -f driver/README.md \
             || { echo "::error::driver/README.md missing (blob provenance)"; exit 1; }
+          grep -qi 'meraki' driver/README.md \
+            || { echo "::error::driver/README.md does not record blob provenance"; exit 1; }
+          echo "  licence and provenance notices present"
 
       - name: No Cisco firmware bundle committed
         run: |
