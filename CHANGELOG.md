@@ -11,6 +11,13 @@ are named after the snapshot revision they were built from (for example
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.1.0] - 2026-10-10
+
+Fixes three driver bugs that made the PoE sysfs interface report wrong values.
+Build revision is unchanged from 1.0.0 (`r0-7670f36`); only the driver differs.
+
 ### Fixed
 
 Three driver bugs, each of which silently reported a wrong value rather than
@@ -113,5 +120,6 @@ Each needs a kernel rebuild and a `sysupgrade` to deploy.
   `bcm59111.bin` firmware blob. Both are required by GPL-2.0 when redistributing
   Cisco-derived material, and were missing before this release.
 
-[Unreleased]: https://github.com/quenode/mx65w-poe-openwrt/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/quenode/mx65w-poe-openwrt/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/quenode/mx65w-poe-openwrt/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/quenode/mx65w-poe-openwrt/releases/tag/v1.0.0
