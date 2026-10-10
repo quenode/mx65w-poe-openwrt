@@ -34,6 +34,22 @@ failing. Full detail in `docs/POE.md`.
   both are trustworthy. It previously derived attachment from `mode` and
   omitted energy entirely.
 
+Verified on live hardware after `sysupgrade`:
+
+| | before | after |
+|---|---|---|
+| `port0/status` | `1` | `good` |
+| `port0/millijoules` | `34263927712` | climbing from 0, in real mJ |
+| `port1/status` | `1` | `open` |
+
+`port1` reading `open` is `DETECT_OPEN` (0x6) - index 6, which was out of
+bounds in the old six-element `detect_state[]`. Real hardware now exercises
+the corrected array.
+
+Energy accounting was cross-checked over 60 seconds against an independent
+trapezoidal integration sampled at the same 1 second resolution the driver
+uses: driver 267859 mJ versus 269513 mJ integrated, a ratio of 0.9939.
+
 ## [1.0.0] - 2026-10-10
 
 First public release. Built against OpenWrt `r0-7670f36`
