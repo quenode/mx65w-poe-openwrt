@@ -11,6 +11,7 @@ name: Verify release artifacts
 
 on:
   push:
+    branches: [master]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -157,8 +158,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Is the release published yet
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A tag can be pushed before the release is uploaded. That is a
+          # normal intermediate state, not a failure - report it and move on.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::no release named $GITHUB_REF_NAME yet; skipping asset checks"
+          fi
+
       - name: Locate the release assets
-        id: assets
+        if: steps.rel.outputs.exists == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -167,6 +182,7 @@ jobs:
           ls -l /tmp/assets
 
       - name: Verify SHA256 checksums
+        if: steps.rel.outputs.exists == 'true'
         run: |
           set -e
           cd /tmp/assets
@@ -174,14 +190,19 @@ jobs:
           sha256sum -c sha256sums
 
       - name: Sanity-check image sizes and types
+        if: steps.rel.outputs.exists == 'true'
         run: |
           set -e
           cd /tmp/assets
+          n=0
           for f in *.initramfs.bin; do
             test -s "$f" || { echo "::error::$f is empty"; exit 1; }
             # FIT images start with the 0xd00dfeed magic.
             magic=$(head -c 4 "$f" | xxd -p)
             [ "$magic" = "d00dfeed" ] \
               || { echo "::error::$f is not a FIT image (magic $magic)"; exit 1; }
+            n=$((n + 1))
           done
-          echo "  all initramfs images are valid FIT images"
+          [ "$n" -ge 2 ] \
+            || { echo "::error::expected both device profiles, found $n initramfs image(s)"; exit 1; }
+          echo "  $n initramfs images, all valid FIT"
