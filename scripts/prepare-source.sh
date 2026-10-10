@@ -10,15 +10,45 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 OPENWRT="$HERE/openwrt"
 TARGET="target/linux/bcm53xx"
 
+# Upstream revision to build against.
+#
+# Pinned so that a fresh clone reproduces the published release images rather
+# than whatever OpenWrt happens to be on any given day. The release for v1.0.0
+# was built from r0-7670f36.
+#
+# To track upstream instead, export MERAKI_OPENWRT_REV=master before running
+# this. Be aware that the driver is ported against specific kernel APIs, so a
+# large jump in kernel version may need the porting work redone.
+OPENWRT_REV=${MERAKI_OPENWRT_REV:-7670f36e38fce4105f96b6fdc07350ea65ac8dca}
+
 if [ ! -d "$OPENWRT" ]; then
-	echo "==> Cloning OpenWrt (this takes a few minutes)"
-	git clone --depth 1 https://github.com/openwrt/openwrt.git "$OPENWRT"
+	echo "==> Cloning OpenWrt at ${OPENWRT_REV%%????????????????????????????????????????} (this takes a few minutes)"
+	git clone https://github.com/openwrt/openwrt.git "$OPENWRT"
+	git -C "$OPENWRT" checkout --quiet "$OPENWRT_REV"
 fi
 
 cd "$OPENWRT"
 
 echo "==> OpenWrt revision:"
 git log -1 --format='    %H %cd %s' --date=short
+
+# Refuse to continue if the tree is not the revision this project expects.
+# Without this, an existing ./openwrt from an earlier or later checkout is
+# silently reused, and the resulting image does not match the one published.
+case "$(git rev-parse HEAD)" in
+"${OPENWRT_REV}")
+	;;
+*)
+	if [ "${OPENWRT_REV}" = "master" ]; then
+		echo "    note: tracking upstream master, as requested"
+	else
+		echo "    WARNING: openwrt/ is at $(git rev-parse --short HEAD),"
+		echo "    WARNING: but this project is pinned to ${OPENWRT_REV}"
+		echo "    WARNING: Remove openwrt/ to re-clone the correct revision,"
+		echo "    WARNING: or export MERAKI_OPENWRT_REV=master to accept it."
+	fi
+	;;
+esac
 
 echo "==> Applying PoE support"
 

@@ -168,6 +168,22 @@ make -C openwrt defconfig
 make -C openwrt -j"$(nproc)"
 ```
 
+`prepare-source.sh` clones OpenWrt at a **pinned revision** so a fresh build
+reproduces the published images rather than whatever upstream is that day. For
+v1.0.0 that is `r0-7670f36`. It fetches only that one commit, so the clone is
+shallow and quick.
+
+If `openwrt/` already exists at a different revision, the script warns and
+carries on rather than silently reusing the wrong tree. Remove `openwrt/` to
+re-clone, or opt into tracking upstream:
+
+```sh
+MERAKI_OPENWRT_REV=master ./scripts/prepare-source.sh
+```
+
+Be aware the BCM59111 driver is ported against specific kernel APIs, so a large
+jump in kernel version may need that porting redone.
+
 ### Output
 
 ```
