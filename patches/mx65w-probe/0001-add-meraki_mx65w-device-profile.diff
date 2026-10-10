@@ -1,15 +1,29 @@
-479a480,493
-> # MX65W: identical board plus two BCM43520 wireless chipsets on the
-> # Broadcom iPROC PCIe controllers. The mx65w device tree enables pcie0
-> # and pcie1, which the plain MX65 leaves disabled. Included so the radio
-> # hardware can be enumerated; no wireless driver binds to BCM43520.
-> define Device/meraki_mx65w
->   $(call Device/meraki_mx6x)
->   DEVICE_MODEL := MX65W
->   DEVICE_DTS_CONFIG := config@3
->   DEVICE_DTS := bcm958625-meraki-mx65w
->   DEVICE_PACKAGES += kmod-hwmon-bcm59111
->   DEVICE_PACKAGES += kmod-brcmfmac
-> endef
-> TARGET_DEVICES += meraki_mx65w
-> 
+diff --git a/target/linux/bcm53xx/image/Makefile b/target/linux/bcm53xx/image/Makefile
+index 2f239dc..c9f4207 100644
+--- a/target/linux/bcm53xx/image/Makefile
++++ b/target/linux/bcm53xx/image/Makefile
+@@ -473,9 +473,24 @@ define Device/meraki_mx65
+   DEVICE_MODEL := MX65
+   DEVICE_DTS_CONFIG := config@3
+   DEVICE_DTS := bcm958625-meraki-mx65
++  DEVICE_PACKAGES += kmod-hwmon-bcm59111
+ endef
+ TARGET_DEVICES += meraki_mx65
+ 
++# MX65W: the MX65 board plus two BCM43520 wireless chipsets on the Broadcom
++# iPROC PCIe controllers. The mx65w device tree enables pcie0 and pcie1,
++# which the plain MX65 leaves disabled. Included so the radio hardware can be
++# enumerated for diagnosis; no wireless driver binds to BCM43520.
++define Device/meraki_mx65w
++  $(call Device/meraki_mx6x)
++  DEVICE_MODEL := MX65W
++  DEVICE_DTS_CONFIG := config@3
++  DEVICE_DTS := bcm958625-meraki-mx65w
++  DEVICE_PACKAGES += kmod-hwmon-bcm59111
++  DEVICE_PACKAGES += kmod-brcmfmac
++endef
++TARGET_DEVICES += meraki_mx65w
++
+ define Device/netgear
+   DEVICE_VENDOR := NETGEAR
+   IMAGES := chk
